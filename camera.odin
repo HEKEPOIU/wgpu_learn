@@ -1,12 +1,15 @@
 package main
 
+import "vendor:wgpu"
 Camera_2D :: struct {
     transform: Transform_2D,
     zoom:      [2]f32,
+    size:      [2]f32,
 }
 
 make_camera :: proc(
     position: [2]f32,
+    size: [2]f32 = {WINDOWS_WIDTH, WINDOWS_HEIGHT},
     rotation: f32 = 0,
     zoom: [2]f32 = {1, 1},
 ) -> (
@@ -15,6 +18,7 @@ make_camera :: proc(
     camera = {
         transform = make_transform(position, rotation),
         zoom      = zoom,
+        size      = size,
     }
     return
 }
@@ -30,7 +34,7 @@ make_view_matrix :: proc(camera: Camera_2D) -> Mat3x3 {
 }
 
 
-make_ortho_matrix :: proc(w: f32, h: f32) -> Mat3x3 {
+make_ortho_matrix :: proc(c: Camera_2D) -> Mat3x3 {
     // aspect := w / h
     // half_w := w / 2
     // half_h := h / 2
@@ -41,12 +45,23 @@ make_ortho_matrix :: proc(w: f32, h: f32) -> Mat3x3 {
     // bottom := -half_h
 
     // x' =  ((x - left)/(right - left)) * 2 - 1
-    // y' =  ((y - down)/(top - bottom)) * 2 - 1
+    // y' =  ((y - top)/(top - bottom)) * 2 - 1
 
+    // odinfmt: disable
     return {
-        2/w , 0     , 0,
-        0   , 2/h   , 0,
-        0   , 0     , 1,
+        2 / c.size.x, 0             , 0,
+        0           , -2 / c.size.y  , 0,
+        0           , 0             , 1,
     }
+    // odinfmt: enable
+}
+
+
+update_vm_to_buffer :: proc(queue: wgpu.Queue, buffer: wgpu.Buffer, c: Camera_2D) {
+    trans := Transform_2DGPU {
+        view       = to_mat4x3(make_view_matrix(c)),
+        projection = to_mat4x3(make_ortho_matrix(c)),
+    }
+    wgpu.QueueWriteBuffer(queue, buffer, 0, &trans, size_of(trans))
 }
 

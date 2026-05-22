@@ -7,12 +7,13 @@ import "core:os"
 import "core:path/filepath"
 import "vendor:wgpu"
 
-get_next_surfaceview_data :: proc(s: wgpu.Surface) -> (wgpu.SurfaceTexture, wgpu.TextureView) {
+get_next_surfaceview_data :: proc(s: wgpu.Surface) -> (wgpu.SurfaceTexture, wgpu.TextureView, wgpu.SurfaceGetCurrentTextureStatus) {
     st := wgpu.SurfaceGetCurrentTexture(s)
     if st.status == .SuccessSuboptimal {
         log.info("underline surface change.")
     } else if st.status != .SuccessOptimal {
-        return st, nil
+        log.infof("status: {}", st.status)
+        return st, nil, st.status
     }
     texture_view := wgpu.TextureCreateView(
         st.texture,
@@ -27,7 +28,7 @@ get_next_surfaceview_data :: proc(s: wgpu.Surface) -> (wgpu.SurfaceTexture, wgpu
             aspect = .All,
         },
     )
-    return st, texture_view
+    return st, texture_view, st.status
 }
 
 request_adapter_sync :: proc(
@@ -113,7 +114,7 @@ log_adapter_info :: proc(a: wgpu.Adapter) {
     log.infof("vendor: {} (id:{})", res.vendor, res.vendorID)
     log.infof("architecture: {}", res.architecture)
     log.infof("device: {} (id:{})", res.device, res.deviceID)
-    log.infof("desc: {}", res.description)
+    log.infof("desc: {}", res.description) 
     log.info(res.backendType)
     log.info(res.adapterType)
 }
@@ -124,7 +125,7 @@ log_device_info :: proc(d: wgpu.Device) {
     log.info(support_feature)
 
     // limits, _ := wgpu.DeviceGetLimits(d)
-    // log.info(limits)
+    // log.info(limits.minUniformBufferOffsetAlignment)
 }
 
 
