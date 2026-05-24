@@ -1,6 +1,5 @@
 package main
 import "core:log"
-import "core:mem"
 import "vendor:glfw"
 import "vendor:wgpu"
 import "vendor:wgpu/glfwglue"
@@ -177,6 +176,8 @@ push_square :: proc(
         },
         index            = {{0, 1, 2}, {0, 2, 3}},
     }
+
+    // create vertex buffer, index buffer.
     {
         vertex_buffer_size := len(square.vertices) * size_of(Vertex_2d)
         vb, ok := create_buffer(
@@ -186,9 +187,15 @@ push_square :: proc(
             "square vertex buffer",
         )
         log.ensure(ok, "failed to create vertex buffer")
+        wgpu.QueueWriteBuffer(
+            g.queue,
+            vb.buffer,
+            0,
+            raw_data(square.vertices),
+            uint(vb.align_size),
+        )
         square.vertices_buffer = vb
     }
-
     {
         index_buffer_size := size_of(square.index[0]) * len(square.index)
         ib, ok := create_buffer(
@@ -198,57 +205,10 @@ push_square :: proc(
             "square index buffer",
         )
         log.ensure(ok, "failed to create index buffer")
+        wgpu.QueueWriteBuffer(g.queue, ib.buffer, 0, raw_data(square.index), uint(ib.align_size))
         square.index_buffer = ib
     }
 
-    upload_buffer: GPU_Buffer
-    {
-        upload_buffer_size := square.index_buffer.align_size + square.vertices_buffer.align_size
-        ub, ok := create_buffer(
-            g.device,
-            upload_buffer_size,
-            {.CopySrc, .MapWrite},
-            "upload buffer",
-            true,
-        )
-        log.ensure(ok, "failed to create upload_buffer")
-        upload_buffer = ub
-    }
-
-    {
-        begin := wgpu.BufferGetMappedRange(upload_buffer.buffer, 0, uint(upload_buffer.align_size))
-        offset := mem.ptr_offset(raw_data(begin), square.vertices_buffer.align_size)
-        mem.copy(raw_data(begin), raw_data(square.vertices), int(square.vertices_buffer.size))
-        mem.copy(offset, raw_data(square.index), int(square.index_buffer.size))
-        wgpu.BufferUnmap(upload_buffer.buffer)
-    }
-
-    // create vertex buffer, index buffer.
-    encoder := wgpu.DeviceCreateCommandEncoder(g.device, &{label = "upload encoder"})
-    wgpu.CommandEncoderCopyBufferToBuffer(
-        encoder,
-        upload_buffer.buffer,
-        0,
-        square.vertices_buffer.buffer,
-        0,
-        square.vertices_buffer.align_size,
-    )
-    wgpu.CommandEncoderCopyBufferToBuffer(
-        encoder,
-        upload_buffer.buffer,
-        square.vertices_buffer.align_size,
-        square.index_buffer.buffer,
-        0,
-        square.index_buffer.align_size,
-    )
-    upload_command_buffer := wgpu.CommandEncoderFinish(encoder, &{})
-    wgpu.CommandEncoderRelease(encoder)
-    wgpu.QueueSubmit(g.queue, {upload_command_buffer})
-
-    wgpu.DevicePoll(g.device, true)
-    wgpu.CommandBufferRelease(upload_command_buffer)
-
-    destroy_buffer(upload_buffer)
     append(&g.state_2d.drawable, square)
 }
 
@@ -309,12 +269,13 @@ create_graphic :: proc(window: glfw.WindowHandle) -> (g: Graphics) {
         log.ensuref(w == .Success, "Failed to get surface capabilities")
         g.surface_format = f.formats[0]
     }
-    w, h := glfw.GetFramebufferSize(window)
+
+    w, h := glfw.GetWindowSize(window)
     wgpu.SurfaceConfigure(
         g.surface,
         &{
-            width = WINDOWS_WIDTH,
-            height = WINDOWS_HEIGHT,
+            width = u32(w),
+            height = u32(h),
             format = g.surface_format,
             usage = {.RenderAttachment},
             device = g.device,
@@ -330,7 +291,8 @@ create_graphic :: proc(window: glfw.WindowHandle) -> (g: Graphics) {
 
     create_render_pipeline_2d(&g)
 
-    g.state_2d.camera = make_camera({WINDOWS_WIDTH / 2, WINDOWS_HEIGHT / 2}, zoom = {1, 1})
+
+    g.state_2d.camera = make_camera({f32(w) / 2, f32(h) / 2}, zoom = {1, 1})
 
     g.state_2d.global_buffer = wgpu.DeviceCreateBuffer(
         g.device,
@@ -430,14 +392,16 @@ update_object_2d_uniform :: proc(g: Graphics) {
 }
 
 draw_graphic :: proc(g: Graphics, window: glfw.WindowHandle) {
+    wgpu.InstanceProcessEvents(g.instance)
     surface_texture, texture_view, state := get_next_surfaceview_data(g.surface)
     if state == .Outdated {
-        w, h := glfw.GetFramebufferSize(window)
+
+        w, h := glfw.GetWindowSize(window)
         wgpu.SurfaceConfigure(
             g.surface,
             &{
-                width = WINDOWS_WIDTH,
-                height = WINDOWS_HEIGHT,
+                width = u32(w),
+                height = u32(h),
                 format = g.surface_format,
                 usage = {.RenderAttachment},
                 device = g.device,
